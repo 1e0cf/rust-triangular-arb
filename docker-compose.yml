@@ -1,0 +1,47 @@
+services:
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+  market_data:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BIN_NAME: market_data
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    ports:
+      - "3001:3000"
+  arb_engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BIN_NAME: arb_engine
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    ports:
+      - "3002:3000"
+  executor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BIN_NAME: executor
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    ports:
+      - "3003:3000"
