@@ -1,10 +1,10 @@
 use crate::app::{CacheEntry, LocalCache};
 use anyhow::bail;
 use flume::Sender;
+use metrics::counter;
 use redis::AsyncCommands;
-use redis::aio::{ConnectionManager, MultiplexedConnection};
+use redis::aio::{ConnectionManager};
 use redis::streams::{StreamReadOptions, StreamReadReply};
-use ringbuf::StaticRb;
 use ringbuf::traits::RingBuffer;
 use shared_types::market_data;
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 #[instrument(skip_all)]
 pub async fn monitor_updates(
@@ -22,11 +22,11 @@ pub async fn monitor_updates(
     process_symbol_commands_sender: Sender<String>,
 ) -> anyhow::Result<()> {
     let opts = StreamReadOptions::default().count(10).block(1000);
-    info!("start the work");
+    info!("Started");
     loop {
         select! {
             _ = cancellation_token.cancelled() => {
-                info!("stop the work");
+                info!("Stop the work");
                 break;
             }
             reply = redis.xread_options(
@@ -39,18 +39,19 @@ pub async fn monitor_updates(
                     for stream_id in stream_key.ids {
                         match parse_market_stream(stream_id.map) {
                             Ok(data) => {
+                                counter!("arb_engine_incoming_depth_updates_total").increment(1);
                                 let symbol = data.symbol.clone();
-                                debug!("writing to cache: {}-{}", symbol, data.timestamp);
+                                debug!("Writing to cache: {}-{}", symbol, data.timestamp);
                                 let mut cache = local_cache.entry(data.symbol.clone()).or_insert(CacheEntry::default());
                                 cache.buf.push_overwrite(data);
 
                                 if !cache.in_flight.swap(true, Ordering::SeqCst) {
-                                    debug!("sending process symbol command: {}", symbol);
+                                    debug!("Sending process symbol command: {}", symbol);
                                     _ = process_symbol_commands_sender.send_async(symbol).await?;
                                 }
                             }
                             Err(e) => {
-                                eprintln!("Ошибка десериализации: {}", e);
+                                error!("deserializing error: {}", e);
                             }
                         }
                     }
@@ -69,5 +70,5 @@ fn parse_market_stream(
         let depth_update: market_data::v1::DepthUpdate = serde_json::from_str(json_str.as_str())?;
         return Ok(depth_update);
     }
-    bail!("invalid message type!")
+    bail!("invalid message type")
 }

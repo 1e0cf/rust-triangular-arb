@@ -1,17 +1,19 @@
-use std::str::FromStr;
 use anyhow::bail;
+use backoff::{Error as BackoffError, ExponentialBackoffBuilder, future::retry};
 use binance_spot_connector_rust::market_stream::partial_depth_100ms;
-use binance_spot_connector_rust::tokio_tungstenite::BinanceWebSocketClient;
+use binance_spot_connector_rust::tokio_tungstenite::{BinanceWebSocketClient, WebSocketState};
 use futures_util::{SinkExt, StreamExt};
-use metrics::{counter};
+use metrics::counter;
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use shared_types::market_data;
-use std::time::{SystemTime, UNIX_EPOCH};
-use rust_decimal::Decimal;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::net::TcpStream;
 use tokio::select;
 use tokio::task::JoinSet;
+use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, trace};
@@ -53,61 +55,86 @@ pub async fn depth_ws_connection(
     symbols: impl IntoIterator<Item = String>,
     redis: ConnectionManager,
 ) -> anyhow::Result<()> {
-    info!("Starting...");
-    let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
+    info!("Starting connection initialization");
+    let backoff = ExponentialBackoffBuilder::new()
+        .with_initial_interval(Duration::from_millis(100))
+        .with_max_interval(Duration::from_secs(30))
+        .with_max_elapsed_time(Some(Duration::from_secs(200))) // keep retrying forever
+        .build();
     let streams: Vec<_> = symbols
         .into_iter()
         .map(|symbol| partial_depth_100ms(symbol.as_ref(), 20).into())
         .collect();
-    conn.subscribe(streams.iter()).await;
-    loop {
-        select! {
-            _ = ctx.cancelled() => {
-                info!("Stop the work");
-                break;
-            },
-            maybe_msg = conn.as_mut().next() => {
-                match maybe_msg {
-                    Some(Ok(msg)) => {
-                        match msg {
-                            Message::Text(txt) => {
-                                if let Ok(message) = serde_json::from_str::<WsDepthMessage>(&txt) {
-                                    handle_ws_depth_message(message, redis.clone()).await?;
-                                }
-                            },
-                            Message::Ping(payload) => {
-                                conn.as_mut().send(Message::Pong(payload)).await?;
-                                info!("Pong");
-                            },
-                            _ => bail!("Unexpected message type"),
-                        }
-                    }
-                    Some(Err(e)) => {
-                        error!("{}", e);
-                        bail!(e);
-                    }
-                    None => {
-                        info!("Stream closed");
+    retry(backoff, || async {
+        if ctx.is_cancelled() {
+            return Ok(());
+        }
+        let (mut conn, _) = match BinanceWebSocketClient::connect_async_default().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                return Err(BackoffError::permanent(anyhow::anyhow!(
+                    "{}",
+                    e.to_string()
+                )));
+            }
+        };
+        conn.subscribe(streams.iter()).await;
+        loop {
+            select! {
+                _ = ctx.cancelled() => {
+                    info!("Context cancelled, stop the work");
+                    return Ok(());
+                },
+                maybe_msg = conn.as_mut().next() => {
+                    let err = handle_ws_message(maybe_msg, &mut conn, redis.clone()).await;
+                    if let Err(e) = err {
+                        error!(?e);
+                        return Err(BackoffError::transient(e));
                     }
                 }
             }
-
+        }
+    })
+    .await?;
+    Ok(())
+}
+type MaybeMessage = Option<Result<Message, tokio_tungstenite::tungstenite::Error>>;
+type WsConnection = WebSocketState<MaybeTlsStream<TcpStream>>;
+async fn handle_ws_message(
+    msg: MaybeMessage,
+    conn: &mut WsConnection,
+    redis: ConnectionManager,
+) -> anyhow::Result<()> {
+    match msg {
+        Some(Ok(msg)) => match msg {
+            Message::Text(txt) => {
+                if let Ok(message) = serde_json::from_str::<WsDepthMessage>(&txt) {
+                    handle_ws_depth_message(message, redis.clone()).await?;
+                }
+            }
+            Message::Ping(payload) => {
+                trace!("Received WebSocket ping frame");
+                conn.as_mut().send(Message::Pong(payload)).await?;
+                trace!("Sent WebSocket pong response");
+            }
+            _ => bail!("unexpected message type"),
+        },
+        Some(Err(e)) => {
+            error!("{}", e);
+            bail!(e);
+        }
+        None => {
+            info!("Stream closed");
         }
     }
     Ok(())
 }
+#[instrument(name = "ws_depth_handler", skip_all)]
 async fn handle_ws_depth_message(
     msg: WsDepthMessage,
     mut redis: ConnectionManager,
 ) -> anyhow::Result<()> {
-    // let p = |val: &[String; 2]| -> (Decimal, Decimal) {
-    //     (
-    //         Decimal::from_str(val[0]).unwrap(),
-    //         Decimal::from_str(val[1]).unwrap(),
-    //     )
-    // };
-    // let bid_levels = msg.data.bids.iter().map(p).collect();
-    // let ask_levels = msg.data.asks.iter().map(p).collect();
+    counter!("market_data_depth_updates_total").increment(1);
     let bid_levels = msg.data.bids;
     let ask_levels = msg.data.asks;
     let symbol = msg.stream.split('@').next().unwrap().to_uppercase();
@@ -123,7 +150,6 @@ async fn handle_ws_depth_message(
         .xadd("market_stream", "*", &[("data", &supdate)])
         .await?;
     trace!("sent update to redis: {:?}", update);
-    counter!("depth_updates").increment(1);
     Ok(())
 }
 
@@ -135,7 +161,7 @@ struct WsDepthMessage {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WsDepthMessageData {
-    last_update_id: u64,
+    // last_update_id: u64,
     bids: Vec<[Decimal; 2]>,
     asks: Vec<[Decimal; 2]>,
 }

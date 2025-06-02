@@ -5,16 +5,16 @@ global:
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:
-      - targets: ['prometheus:9090']
+      - targets: ['localhost:9090']
 
   - job_name: 'market_data'
     static_configs:
-      - targets: ['market_data:3001']
+      - targets: ['market_data:9090']
 
   - job_name: 'arb_engine'
     static_configs:
-      - targets: ['arb_engine:3002']
+      - targets: ['arb_engine:9090']
 
   - job_name: 'executor'
     static_configs:
-      - targets: ['executor:3003']
+      - targets: ['executor:9090']

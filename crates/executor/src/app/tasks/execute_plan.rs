@@ -1,18 +1,17 @@
-use std::sync::Arc;
+use crate::config::CONFIG;
+use anyhow::bail;
 use binance_spot_connector_rust::http::Credentials;
-use binance_spot_connector_rust::hyper::{BinanceHttpClient, Error};
+use binance_spot_connector_rust::hyper::{BinanceHttpClient};
 use binance_spot_connector_rust::trade;
 use binance_spot_connector_rust::trade::order::{Side, TimeInForce};
-use rust_decimal::Decimal;
-use rust_decimal::prelude::FromPrimitive;
+use metrics::counter;
 use shared_types::arb_engine;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument};
-use crate::config::CONFIG;
+use tracing::{info, instrument};
 
-#[instrument(skip(ctx, plan))]
+#[instrument(skip(_ctx, plan))]
 pub async fn execute_plan(
-    ctx: CancellationToken,
+    _ctx: CancellationToken,
     plan: arb_engine::v1::ArbitragePlan,
 ) -> anyhow::Result<()> {
     let client = BinanceHttpClient::default().credentials(Credentials::from_hmac(
@@ -36,14 +35,20 @@ pub async fn execute_plan(
             .time_in_force(TimeInForce::Fok);
 
         let response = client.send(request).await;
-        if let Ok(response) = response {
-            match response.into_body_str().await {
+        counter!("executor_orders_sent_total").increment(1);
+        match response {
+            Ok(response) => match response.into_body_str().await {
                 Ok(body) => {
                     info!("RESPONSE: {}", body);
                 }
                 Err(e) => {
-                    error!("{:?}", e);
+                    counter!("executor_orders_failed_total").increment(1);
+                    bail!("{:?}", e);
                 }
+            },
+            Err(e) => {
+                counter!("executor_orders_failed_total").increment(1);
+                bail!("{:?}", e);
             }
         }
     }

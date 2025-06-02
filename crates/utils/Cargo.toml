@@ -9,6 +9,9 @@ tokio.workspace = true
 tokio-util.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
 metrics-exporter-prometheus = "0.17.0"
 axum = "0.8.4"

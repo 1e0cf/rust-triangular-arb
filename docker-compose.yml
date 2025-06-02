@@ -1,14 +1,27 @@
 services:
   redis:
-    image: redis:8-alpine
-    ports:
-      - "6379:6379"
+    image: redis:8-bookworm
+    networks:
+      - redis
+    expose:
+      - "6379"
   prometheus:
     image: prom/prometheus
     volumes:
+      - prometheus_data:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
     ports:
       - "9090:9090"
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - monitoring
   market_data:
     build:
       context: .
@@ -19,8 +32,11 @@ services:
       - redis
     env_file:
       - .env
-    ports:
-      - "3001:3000"
+    networks:
+      - monitoring
+      - redis
+    expose:
+      - "9090"
   arb_engine:
     build:
       context: .
@@ -31,8 +47,11 @@ services:
       - redis
     env_file:
       - .env
-    ports:
-      - "3002:3000"
+    networks:
+      - monitoring
+      - redis
+    expose:
+      - "9090"
   executor:
     build:
       context: .
@@ -43,5 +62,17 @@ services:
       - redis
     env_file:
       - .env
-    ports:
-      - "3003:3000"
+    networks:
+      - monitoring
+      - redis
+    expose:
+      - "9090"
+
+volumes:
+  prometheus_data:
+  grafana_data:
+networks:
+  monitoring:
+    driver: bridge
+  redis:
+    driver: bridge

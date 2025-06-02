@@ -1,14 +1,12 @@
-use crate::app::{AppState, ArbitrageGraph, TokenPair, tasks};
+use crate::app::{AppState, tasks};
 use crate::config::CONFIG;
 use anyhow::bail;
 use std::sync::Arc;
-use tokio::task::{JoinError, JoinSet};
+use tokio::task::{JoinSet};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
 
 pub(crate) async fn run(ctx: CancellationToken) -> anyhow::Result<()> {
-    let mut app = Arc::new(AppState::init(CONFIG.redis_url.as_str()).await?);
-    println!("123");
+    let app = Arc::new(AppState::init(CONFIG.redis_url.as_str()).await?);
     let mut tasks = JoinSet::new();
     let (process_symbol_commands_sender, process_symbol_commands_receiver) = flume::unbounded();
     tasks.spawn(tasks::process_depth_update::worker_pool(
@@ -29,7 +27,7 @@ pub(crate) async fn run(ctx: CancellationToken) -> anyhow::Result<()> {
             Err(e) => {
                 ctx.cancel();
                 while let Some(_) = tasks.join_next().await {}
-                return bail!(e);
+                bail!(e);
             }
             _ => {}
         }

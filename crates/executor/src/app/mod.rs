@@ -1,6 +1,6 @@
 mod runner;
-pub mod tasks;
 mod state;
+pub mod tasks;
 
 pub use runner::run;
 pub use state::AppState;

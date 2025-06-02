@@ -22,6 +22,6 @@ metrics.workspace = true
 futures-util.workspace = true
 
 tokio-tungstenite = { version = "0.23.0"} # use 0.23.0 because binance_spot_connector_rust
-backoff = "0.4.0"
+backoff = { version = "0.4.0", features = ["tokio"] }
 binance_spot_connector_rust = { version = "1.3.0", features = ["enable-hyper", "enable-tokio-tungstenite"]}
 

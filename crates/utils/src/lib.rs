@@ -1,3 +1,4 @@
+pub mod decimal;
 mod signal;
 mod tracing;
 

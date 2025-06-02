@@ -1,22 +1,19 @@
-use crate::app::{AppState, LocalCache, TokenPair, Triangle};
+use crate::app::math::calculate_plan;
+use crate::app::{AppState, Triangle};
+use crate::config::CONFIG;
 use anyhow::bail;
-use dashmap::DashMap;
 use flume::Receiver;
+use metrics::counter;
+use redis::AsyncCommands;
 use ringbuf::traits::{Consumer, Producer};
+use rust_decimal::Decimal;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use redis::AsyncCommands;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use tokio::select;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn};
-use crate::app::math::calculate_plan;
-use crate::config::CONFIG;
+use tracing::{debug, error, info, instrument};
 
-const AMOUNT: Decimal = dec!(6.2);
-const FEE: Decimal = dec!(0.0001);
 
 pub async fn worker_pool(
     ctx: CancellationToken,
@@ -64,7 +61,7 @@ async fn process_symbol_worker(
                         process_one_symbol(symbol, state.clone()).await?;
                     },
                     Err(e) => {
-                        return bail!("failed while receive depth update: {:?}", e);
+                        bail!("failed while receive depth update: {:?}", e);
                     }
                 }
             }
@@ -94,13 +91,21 @@ async fn process_one_symbol(symbol: String, state: Arc<AppState>) -> anyhow::Res
         .collect();
     for triangle in triangles {
         let prices = get_price_vol(triangle, state.clone()).expect("failed to get prices");
-        let plan = calculate_plan(triangle, prices, AMOUNT, FEE);
-        if plan.profit_percent >= CONFIG.min_profit_perc {
-            let splan = serde_json::to_string(&plan)?;
-            let mut redis = state.redis.clone();
-            let _: String = redis
-                .xadd("plan_stream", "*", &[("data", &splan)])
-                .await?;
+        let plan = calculate_plan(triangle, prices.clone(), CONFIG.cycle_volume, CONFIG.fee_percent);
+
+        if let Ok(plan) = plan {
+            counter!("arb_engine_plans_total").increment(1);
+            debug!("{:?}", plan);
+            if plan.profit_percent >= CONFIG.min_profit_perc {
+                info!("{:?}", plan);
+                let splan = serde_json::to_string(&plan)?;
+                let mut redis = state.redis.clone();
+                let _: String = redis.xadd("plan_stream", "*", &[("data", &splan)]).await?;
+                counter!("arb_engine_outgoing_plans_total").increment(1);
+            }
+        } else if let Err(e) = plan {
+            counter!("arb_engine_failed_plans_total").increment(1);
+            error!("{}", e.to_string());
         }
     }
     let entry = state.local_cache.get_mut(symbol.as_str()).unwrap();
@@ -114,26 +119,33 @@ fn get_price_vol(triangle: &Triangle, state: Arc<AppState>) -> Option<[Vec<[Deci
     let symbol_2 = triangle.pairs[1].symbol.to_string();
     let symbol_3 = triangle.pairs[2].symbol.to_string();
 
-    let asks_1 = {
+    let orders_1 = {
         let mut entry = state.local_cache.get_mut(&symbol_1)?;
         let depth = entry.buf.try_pop()?;
         let asks = depth.ask_levels.clone();
         _ = entry.buf.try_push(depth);
         asks
     };
-    let bids_2 = {
+    let orders_2 = {
         let mut entry = state.local_cache.get_mut(&symbol_2)?;
         let depth = entry.buf.try_pop()?;
-        let bids = depth.bid_levels.clone();
+        let orders;
+        if triangle.intermediate_token == triangle.pairs[0].base
+            && triangle.intermediate_token == triangle.pairs[1].base
+        {
+            orders = depth.bid_levels.clone();
+        } else {
+            orders = depth.ask_levels.clone();
+        }
         _ = entry.buf.try_push(depth);
-        bids
+        orders
     };
-    let bids_3 = {
+    let orders_3 = {
         let mut entry = state.local_cache.get_mut(&symbol_3)?;
         let depth = entry.buf.try_pop()?;
         let bids = depth.bid_levels.clone();
         _ = entry.buf.try_push(depth);
         bids
     };
-    Some([asks_1, bids_2, bids_3])
+    Some([orders_1, orders_2, orders_3])
 }

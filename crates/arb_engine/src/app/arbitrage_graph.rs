@@ -1,7 +1,7 @@
 use ahash::{AHashMap, AHashSet};
+use binance_connector::types::exchange_info::PairInfo;
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::sync::Arc;
-use tracing::info;
 
 pub struct ArbitrageGraph {
     graph: DiGraph<Arc<str>, TokenPair>,
@@ -190,7 +190,7 @@ impl ArbitrageGraph {
             }
         }
     }
-    pub fn get_triangles_by_token(&self, token: &str) -> Vec<&Triangle> {
+    /*pub fn get_triangles_by_token(&self, token: &str) -> Vec<&Triangle> {
         let token_arc = Arc::from(token);
         let mut result = Vec::new();
 
@@ -209,7 +209,7 @@ impl ArbitrageGraph {
         }
 
         result
-    }
+    }*/
     pub fn get_triangles_by_symbol(&self, symbol: &str) -> Vec<&Triangle> {
         // TODO: Option or zero Vec?
         let mut result = Vec::new();
@@ -253,13 +253,15 @@ pub struct TokenPair {
     pub base: Arc<str>,
     pub quote: Arc<str>,
     pub symbol: Arc<str>,
+    pub info: PairInfo,
 }
 impl TokenPair {
-    pub fn new(base: &str, quote: &str) -> Self {
+    pub fn new(pair_info: PairInfo) -> Self {
         Self {
-            base: Arc::from(base),
-            quote: Arc::from(quote),
-            symbol: Arc::from(format!("{}{}", base, quote)),
+            base: Arc::from(pair_info.base_asset.clone()),
+            quote: Arc::from(pair_info.quote_asset.clone()),
+            symbol: Arc::from(pair_info.symbol.clone()),
+            info: pair_info,
         }
     }
 }

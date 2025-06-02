@@ -5,7 +5,7 @@ use axum::routing::get;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use std::future::ready;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::info;
 
 pub fn setup_tracing() {
     tracing_subscriber::fmt()
@@ -33,7 +33,7 @@ pub async fn start_metrics_health_server(
 ) -> anyhow::Result<()> {
     let app = metrics_health_app(prometheus_handle);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    debug!("Metrics server listening on {}", listener.local_addr()?);
+    info!("Metrics server listening on {}", listener.local_addr()?);
     axum::serve(listener, app)
         .with_graceful_shutdown(signal_listener(ctx))
         .await?;
