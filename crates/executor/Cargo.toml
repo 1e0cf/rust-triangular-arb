@@ -7,6 +7,7 @@ edition = "2024"
 shared_types = {path = "../shared_types"}
 utils = {path = "../utils"}
 
+mimalloc.workspace = true
 anyhow.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true

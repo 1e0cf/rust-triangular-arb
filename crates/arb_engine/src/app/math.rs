@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use shared_types::arb_engine;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::info;
 use utils::decimal::DecimalExt;
 
 pub fn calculate_plan(
@@ -86,18 +87,16 @@ fn calculate_triangle_amounts(
     let (tokenB_amount, tokenC_amount, final_amount);
     let (tokenA_dust, tokenB_dust, tokenC_dust);
 
-    (order1_amount, tokenA_dust) =
+    (order1_amount, tokenB_amount, tokenA_dust) =
         calculate_buy_order_amounts(amount, prices.0, step_dps.0, fee_percent); // order 1
-    tokenB_amount = order1_amount;
     if B_is_base {
         // SELL
         (order2_amount, tokenC_amount, tokenB_dust) =
             calculate_sell_order_amounts(tokenB_amount, prices.1, step_dps.1, fee_percent);
     } else {
         // BUY
-        (order2_amount, tokenB_dust) =
+        (order2_amount, tokenC_amount, tokenB_dust) =
             calculate_buy_order_amounts(tokenB_amount, prices.1, step_dps.1, fee_percent);
-        tokenC_amount = order2_amount
     }
     (order3_amount, final_amount, tokenC_dust) =
         calculate_sell_order_amounts(tokenC_amount, prices.2, step_dps.2, fee_percent);
@@ -114,11 +113,12 @@ fn calculate_buy_order_amounts(
     price: Decimal,
     step_dp: u32,
     fee_percent: Decimal,
-) -> (Decimal, Decimal) {
-    let base_amount = quote_amount / price * (Decimal::ONE - fee_percent);
-    let order_amount = base_amount.truncate_to_dp(step_dp); // Round to avoid getting a LOT_SIZE error
-    let quote_dust = (base_amount - order_amount).round_dp(8);
-    (order_amount, quote_dust)
+) -> (Decimal, Decimal, Decimal) {
+    let order_amount = (quote_amount / price).truncate_to_dp(step_dp); // Round to avoid getting a LOT_SIZE error
+    let fee = order_amount * fee_percent;
+    let tokens_get = order_amount - fee;
+    let quote_dust = (quote_amount / price - order_amount).round_dp(8);
+    (order_amount, tokens_get, quote_dust)
 }
 // We want to sell all base amount, and avoid LOT_SIZE error
 fn calculate_sell_order_amounts(
@@ -128,10 +128,12 @@ fn calculate_sell_order_amounts(
     fee_percent: Decimal,
 ) -> (Decimal, Decimal, Decimal) {
     let order_amount = base_amount.truncate_to_dp(step_dp);
-    let quote_amount = (order_amount * price * (dec!(1.0) - fee_percent)).round_dp(8);
+    let quote_amount = (order_amount * price).round_dp(8);
+    let fee = quote_amount * fee_percent;
+    let tokens_get = quote_amount - fee;
 
     let base_dust = base_amount - order_amount;
-    (order_amount, quote_amount, base_dust)
+    (order_amount, tokens_get, base_dust)
 }
 fn calculate_profit_percent(amount: Decimal, final_amount: Decimal) -> Decimal {
     (final_amount - amount) / amount * dec!(100.0)

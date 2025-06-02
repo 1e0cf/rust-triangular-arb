@@ -1,9 +1,12 @@
-pub(crate) mod app;
-mod config;
-
+use mimalloc::MiMalloc;
 use crate::config::CONFIG;
 use tokio_util::sync::CancellationToken;
 use utils::{setup_prometheus, setup_tracing, start_metrics_health_server};
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
+pub(crate) mod app;
+mod config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

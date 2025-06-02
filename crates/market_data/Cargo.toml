@@ -8,6 +8,7 @@ shared_types = {path = "../shared_types"}
 binance_connector = {path = "../binance_connector"}
 utils = {path = "../utils"}
 
+mimalloc.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

@@ -19,15 +19,7 @@ COPY --from=planner /app/recipe.json recipe.json
 
 RUN cargo chef cook --release --recipe-path recipe.json
 
-#COPY --from=deps /app/target target
-#COPY --from=deps /usr/local/cargo /usr/local/cargo
-
 COPY . .
-
-#COPY crates/utils ./crates/utils
-#COPY crates/shared_types ./crates/shared_types
-#COPY crates/binance_connector ./crates/binance_connector
-#COPY crates/${BIN_NAME} ./crates/${BIN_NAME}
 
 RUN cargo build --release --bin ${BIN_NAME}
 
