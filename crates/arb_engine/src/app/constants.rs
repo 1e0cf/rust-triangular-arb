@@ -1,0 +1,1 @@
+pub const REDIS_STREAM_LEN_APPROX: usize = 500;

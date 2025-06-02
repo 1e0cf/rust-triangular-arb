@@ -6,6 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use metrics::counter;
 use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
+use redis::streams::StreamMaxlen;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use shared_types::market_data;
@@ -17,6 +18,7 @@ use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, trace};
+use crate::app::constants::REDIS_STREAM_LEN_APPROX;
 
 pub async fn depth_ws_connections_pool(
     ctx: CancellationToken,
@@ -147,7 +149,12 @@ async fn handle_ws_depth_message(
     };
     let supdate = serde_json::to_string(&update)?;
     let _: String = redis
-        .xadd("market_stream", "*", &[("data", &supdate)])
+        .xadd_maxlen(
+            "market_stream",
+            StreamMaxlen::Approx(REDIS_STREAM_LEN_APPROX),
+            "*",
+            &[("data", &supdate)],
+        )
         .await?;
     trace!("sent update to redis: {:?}", update);
     Ok(())

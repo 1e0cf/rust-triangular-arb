@@ -1,3 +1,4 @@
+use crate::app::constants::REDIS_STREAM_LEN_APPROX;
 use crate::app::math::calculate_plan;
 use crate::app::{AppState, Triangle};
 use crate::config::CONFIG;
@@ -5,6 +6,7 @@ use anyhow::bail;
 use flume::Receiver;
 use metrics::counter;
 use redis::AsyncCommands;
+use redis::streams::StreamMaxlen;
 use ringbuf::traits::{Consumer, Producer};
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -13,7 +15,6 @@ use tokio::select;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
-
 
 pub async fn worker_pool(
     ctx: CancellationToken,
@@ -91,7 +92,12 @@ async fn process_one_symbol(symbol: String, state: Arc<AppState>) -> anyhow::Res
         .collect();
     for triangle in triangles {
         let prices = get_price_vol(triangle, state.clone()).expect("failed to get prices");
-        let plan = calculate_plan(triangle, prices.clone(), CONFIG.cycle_volume, CONFIG.fee_percent);
+        let plan = calculate_plan(
+            triangle,
+            prices.clone(),
+            CONFIG.cycle_volume,
+            CONFIG.fee_percent,
+        );
 
         if let Ok(plan) = plan {
             counter!("arb_engine_plans_total").increment(1);
@@ -100,7 +106,14 @@ async fn process_one_symbol(symbol: String, state: Arc<AppState>) -> anyhow::Res
                 info!("{:?}", plan);
                 let splan = serde_json::to_string(&plan)?;
                 let mut redis = state.redis.clone();
-                let _: String = redis.xadd("plan_stream", "*", &[("data", &splan)]).await?;
+                let _: String = redis
+                    .xadd_maxlen(
+                        "plan_stream",
+                        StreamMaxlen::Approx(REDIS_STREAM_LEN_APPROX),
+                        "*",
+                        &[("data", &splan)],
+                    )
+                    .await?;
                 counter!("arb_engine_outgoing_plans_total").increment(1);
             }
         } else if let Err(e) = plan {

@@ -2,6 +2,7 @@ mod arbitrage_graph;
 mod math;
 mod runner;
 pub(crate) mod tasks;
+mod constants;
 
 pub use arbitrage_graph::{ArbitrageGraph, TokenPair, Triangle};
 use binance_connector::fetch_exchange_info;
