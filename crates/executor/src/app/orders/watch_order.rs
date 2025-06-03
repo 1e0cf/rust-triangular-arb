@@ -27,6 +27,7 @@ pub async fn watch_order(
                 return Ok(());
             }
             OrderStatus::PartiallyFilled | OrderStatus::New | OrderStatus::PendingNew => {
+                tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
             _ => {
