@@ -45,7 +45,6 @@ pub async fn listen_plans(
                                         error!(?e);
                                     }
                                 }).await?;
-                                return Ok(());
                             }
                             Err(e) => {
                                 eprintln!("Ошибка десериализации: {}", e);
