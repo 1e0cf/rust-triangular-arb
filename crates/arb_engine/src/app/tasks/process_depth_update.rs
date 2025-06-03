@@ -4,7 +4,7 @@ use crate::app::{AppState, Triangle};
 use crate::config::CONFIG;
 use anyhow::bail;
 use flume::Receiver;
-use metrics::counter;
+use metrics::{counter, gauge, histogram};
 use redis::AsyncCommands;
 use redis::streams::StreamMaxlen;
 use ringbuf::traits::{Consumer, Producer};
@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::select;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
@@ -59,7 +60,9 @@ async fn process_symbol_worker(
             command = process_symbol_commands_receiver.recv_async() => {
                 match command {
                     Ok(symbol) => {
+                        let start = Instant::now();
                         process_one_symbol(symbol, state.clone()).await?;
+                        histogram!("arb_engine_depth_update_seconds").record(start.elapsed().as_secs_f64());
                     },
                     Err(e) => {
                         bail!("failed while receive depth update: {:?}", e);
@@ -72,6 +75,7 @@ async fn process_symbol_worker(
 }
 
 // Proceed local cache HashMap key
+#[instrument(skip(state))]
 async fn process_one_symbol(symbol: String, state: Arc<AppState>) -> anyhow::Result<()> {
     let mut local_symbols = Vec::new();
     let triangles: Vec<&Triangle> = state

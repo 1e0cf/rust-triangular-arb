@@ -3,5 +3,5 @@ use tokio_util::sync::CancellationToken;
 
 pub async fn run(ctx: CancellationToken) -> anyhow::Result<()> {
     let state = AppState::init().await?;
-    tasks::listen_plans(ctx, state.redis.clone()).await
+    tasks::listen_plans(ctx, state.redis.clone(), state.binance_client.clone()).await
 }

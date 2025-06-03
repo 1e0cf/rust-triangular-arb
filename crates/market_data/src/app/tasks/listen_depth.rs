@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use shared_types::market_data;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use backoff::future::retry_notify;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::task::JoinSet;
@@ -67,7 +68,11 @@ pub async fn depth_ws_connection(
         .into_iter()
         .map(|symbol| partial_depth_100ms(symbol.as_ref(), 20).into())
         .collect();
-    retry(backoff, || async {
+    let notify = |err, dur: Duration| {
+        error!(?err);
+        info!("Reconnecting after {} ms", dur.as_millis());
+    };
+    retry_notify(backoff, || async {
         if ctx.is_cancelled() {
             return Ok(());
         }
@@ -88,15 +93,11 @@ pub async fn depth_ws_connection(
                     return Ok(());
                 },
                 maybe_msg = conn.as_mut().next() => {
-                    let err = handle_ws_message(maybe_msg, &mut conn, redis.clone()).await;
-                    if let Err(e) = err {
-                        error!(?e);
-                        return Err(BackoffError::transient(e));
-                    }
+                    let err = handle_ws_message(maybe_msg, &mut conn, redis.clone()).await?;
                 }
             }
         }
-    })
+    }, notify)
     .await?;
     Ok(())
 }
@@ -122,7 +123,6 @@ async fn handle_ws_message(
             _ => bail!("unexpected message type"),
         },
         Some(Err(e)) => {
-            error!("{}", e);
             bail!(e);
         }
         None => {

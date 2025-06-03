@@ -7,6 +7,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 pub(crate) mod app;
 mod config;
+pub(crate) mod types;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
