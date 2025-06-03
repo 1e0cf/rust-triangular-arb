@@ -696,6 +696,7 @@ dependencies = [
  "metrics",
  "mimalloc",
  "once_cell",
+ "rand 0.8.5",
  "redis",
  "reqwest",
  "rust_decimal",
@@ -704,6 +705,7 @@ dependencies = [
  "shared_types",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
  "utils",
 ]

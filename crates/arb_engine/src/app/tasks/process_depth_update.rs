@@ -62,7 +62,7 @@ async fn process_symbol_worker(
                     Ok(symbol) => {
                         let start = Instant::now();
                         process_one_symbol(symbol, state.clone()).await?;
-                        histogram!("arb_engine_depth_update_seconds").record(start.elapsed().as_secs_f64());
+                        histogram!("arb_engine_depth_update_seconds").record(start.elapsed().as_secs_f64()); // scan_duration_ms
                     },
                     Err(e) => {
                         bail!("failed while receive depth update: {:?}", e);

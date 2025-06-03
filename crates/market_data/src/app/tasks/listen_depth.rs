@@ -71,6 +71,8 @@ pub async fn depth_ws_connection(
     let notify = |err, dur: Duration| {
         error!(?err);
         info!("Reconnecting after {} ms", dur.as_millis());
+        counter!("market_data_ws_errors_total").increment(1);
+        counter!("market_data_reconnects_total").increment(1);
     };
     retry_notify(backoff, || async {
         if ctx.is_cancelled() {
@@ -79,6 +81,7 @@ pub async fn depth_ws_connection(
         let (mut conn, _) = match BinanceWebSocketClient::connect_async_default().await {
             Ok(conn) => conn,
             Err(e) => {
+                counter!("market_data_ws_errors_total").increment(1);
                 return Err(BackoffError::permanent(anyhow::anyhow!(
                     "{}",
                     e.to_string()
